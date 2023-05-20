@@ -321,32 +321,38 @@ class VortexLatticeMethod(ExplicitAnalysis):
                 CD_functions = []
                 chords = []
                 three_quarter_chords = []
+                twist = []
                 for xsec in wingID.xsecs:
                     CD_functions.append(xsec.airfoil.CD_function)
                     chords.append(xsec.chord)
                     three_quarter_chords.append(xsec.xyz_le + np.array([0.75 * xsec.chord, 0, 0]))
+                    twist.append(xsec.twist)
                 # taking out the section at the root
                 CD_functions_no_root = CD_functions[1:]
                 chords_no_root = chords[1:]
                 three_quarter_chords_no_root = three_quarter_chords[1:]
+                twist_no_root = twist[1:]
                 # flipping the vectors to integrate from -b/2 to b/2
                 CD_functions = CD_functions[::-1]
                 chords = chords[::-1]
                 three_quarter_chords = three_quarter_chords[::-1]
+                twist = twist[::-1]
 
                 if wingID.symmetric:
                     CD_functions.extend(CD_functions_no_root)
                     chords.extend(chords_no_root)
                     three_quarter_chords.extend(three_quarter_chords_no_root)
+                    twist.extend(twist_no_root)
 
                 self.chords = np.array(chords)
                 self.three_quarter_chords = np.array(three_quarter_chords)
+                self.twist = np.array(twist)
 
                 self.V_three_quarter_induced = self.get_induced_velocity_at_points(
                                     points=self.three_quarter_chords)              # induced velocity at three-quarter chord
 
                 self.V_three_quarter = self.get_velocity_at_points(points=self.three_quarter_chords)  # total v used for Re
-                V_three_quarter_magnitudes = np.linalg.norm(self.V_three_quarter, axis=1)
+                self.V_three_quarter_magnitudes = np.linalg.norm(self.V_three_quarter, axis=1)
 
                 rot_freestream_velocities = self.op_point.compute_rotation_velocity_geometry_axes(
                     self.three_quarter_chords)
@@ -354,13 +360,14 @@ class VortexLatticeMethod(ExplicitAnalysis):
                 freestream_velocities_magnitudes = np.linalg.norm(self.inf_velocities, axis=1) # 1 x 3 v mag
                 self.freestream_velocities_magnitude = np.linalg.norm(freestream_velocities_magnitudes)
                 self.alpha_induced = np.arctan2d(-self.V_three_quarter_induced[:, 2], self.freestream_velocities_magnitude)     # minus to be positive alpha
-                self.alpha_eff = self.op_point.alpha - self.alpha_induced
+                self.alpha_eff = self.op_point.alpha + self.twist - self.alpha_induced
+
                 Re = (
-                    V_three_quarter_magnitudes *
+                    self.V_three_quarter_magnitudes *
                     chords /
                     self.op_point.atmosphere.kinematic_viscosity()
                 )
-                machs = V_three_quarter_magnitudes / self.op_point.atmosphere.speed_of_sound()
+                machs = self.V_three_quarter_magnitudes / self.op_point.atmosphere.speed_of_sound()
 
                 self.CDs = np.array([
                     polar_function(
@@ -393,6 +400,8 @@ class VortexLatticeMethod(ExplicitAnalysis):
 
             CD_viscous = np.sum(self.Cd_profile * self.wings_area) / np.sum(self.wings_area)
             self.CD_viscous = CD_viscous
+        else:
+            self.CD_viscous = 0
 
         # Calculate nondimensional forces
         q = self.op_point.dynamic_pressure()
@@ -400,9 +409,7 @@ class VortexLatticeMethod(ExplicitAnalysis):
         b_ref = self.airplane.b_ref
         c_ref = self.airplane.c_ref
         self.CL = L / q / s_ref
-        self.CD = D / q / s_ref
-        if self.viscous:
-            self.CD = self.CD + self.CD_viscous
+        self.CD = D / q / s_ref + self.CD_viscous
         self.CY = Y / q / s_ref
         self.Cl = l_b / q / s_ref / b_ref
         self.Cm = m_b / q / s_ref / c_ref
@@ -422,6 +429,7 @@ class VortexLatticeMethod(ExplicitAnalysis):
             "m_b": m_b,
             "n_b": n_b,
             "CL": self.CL,
+            "CDp": self.CD_viscous,
             "CD": self.CD,
             "CY": self.CY,
             "Cl": self.Cl,

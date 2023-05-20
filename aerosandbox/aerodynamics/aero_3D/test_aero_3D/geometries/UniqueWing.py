@@ -18,38 +18,38 @@ airplane = asb.Airplane(
                     xyz_le=[0, 0, 0],
                     chord=1,
                     twist=0,
-                    airfoil=sd7037,
+                    airfoil=naca0012,
                 ),
                 asb.WingXSec(
                     xyz_le=[0, 0.5, 0],
                     chord=1,
                     twist=0,
-                    airfoil=sd7037,
+                    airfoil=naca0012,
                 ),
                 asb.WingXSec(
                     xyz_le=[0.3, 3.5, 0],
                     chord=1,
                     twist=0,
-                    airfoil=sd7037,
+                    airfoil=naca0012,
                 )
             ]
         )
-  #       asb.Wing(
-  #           name="H-stab",
-  #           symmetric=True,
-  #           xsecs=[
-  #               asb.WingXSec(
-  #                   xyz_le=[0, 0, 0],
-  #                   chord=0.7,
-  #                   airfoil=sd7037,
-  #               ),
-  #               asb.WingXSec(
-  #                   xyz_le=[0.14, 1.25, 0],
-  #                   chord=0.42,
-  #                   airfoil=sd7037,
-  #               ),
-  #           ]
-  #       ).translate([4, 0, 0]),
+        # asb.Wing(
+        #     name="H-stab",
+        #     symmetric=True,
+        #     xsecs=[
+        #         asb.WingXSec(
+        #             xyz_le=[0, 0, 0],
+        #             chord=0.7,
+        #             airfoil=naca0012,
+        #         ),
+        #         asb.WingXSec(
+        #             xyz_le=[0.14, 1.25, 0],
+        #             chord=0.42,
+        #             airfoil=naca0012,
+        #         ),
+        #     ]
+        # ).translate([4, 0, 0.6]),
    ]
 )
 
