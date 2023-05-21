@@ -50,6 +50,7 @@ class VortexLatticeMethod(ExplicitAnalysis):
                  chordwise_spacing_function: Callable[[float, float, float], np.ndarray] = np.cosspace,
                  vortex_core_radius: float = 1e-8,
                  align_trailing_vortices_with_wind: bool = False,
+                 viscous: bool = True
                  ):
         super().__init__()
 
@@ -67,6 +68,7 @@ class VortexLatticeMethod(ExplicitAnalysis):
         self.chordwise_spacing_function = chordwise_spacing_function
         self.vortex_core_radius = vortex_core_radius
         self.align_trailing_vortices_with_wind = align_trailing_vortices_with_wind
+        self.viscous = viscous
 
         ### Determine whether you should run the problem as symmetric
         self.run_symmetric = False
@@ -126,6 +128,7 @@ class VortexLatticeMethod(ExplicitAnalysis):
         back_right_vertices = []
         front_right_vertices = []
         is_trailing_edge = []
+        wings = []
 
         for wing in self.airplane.wings:
             if self.spanwise_resolution > 1:
@@ -133,7 +136,7 @@ class VortexLatticeMethod(ExplicitAnalysis):
                     ratio=self.spanwise_resolution,
                     spacing_function=self.spanwise_spacing_function
                 )
-
+            wings.append(wing)
             points, faces = wing.mesh_thin_surface(
                 method="quad",
                 chordwise_resolution=self.chordwise_resolution,
@@ -185,6 +188,9 @@ class VortexLatticeMethod(ExplicitAnalysis):
         self.vortex_centers = vortex_centers
         self.vortex_bound_leg = vortex_bound_leg
         self.collocation_points = collocation_points
+
+        self.wings = wings
+
 
         ##### Setup Operating Point
         if self.verbose:
@@ -304,6 +310,90 @@ class VortexLatticeMethod(ExplicitAnalysis):
         m_b = moment_body[1]
         n_b = moment_body[2]
 
+
+        wings_area = []
+        Cd_wings = []
+
+        # Compute CD profile, if the wing is symmetric perform computation from -b/2 to b/2
+        # otherwise from root to tip
+        if self.viscous:
+            for wingID in self.wings:
+                CD_functions = []
+                chords = []
+                three_quarter_chords = []
+                for xsec in wingID.xsecs:
+                    CD_functions.append(xsec.airfoil.CD_function)
+                    chords.append(xsec.chord)
+                    three_quarter_chords.append(xsec.xyz_le + np.array([0.75 * xsec.chord, 0, 0]))
+                # taking out the section at the root
+                CD_functions_no_root = CD_functions[1:]
+                chords_no_root = chords[1:]
+                three_quarter_chords_no_root = three_quarter_chords[1:]
+                # flipping the vectors to integrate from -b/2 to b/2
+                CD_functions = CD_functions[::-1]
+                chords = chords[::-1]
+                three_quarter_chords = three_quarter_chords[::-1]
+
+                if wingID.symmetric:
+                    CD_functions.extend(CD_functions_no_root)
+                    chords.extend(chords_no_root)
+                    three_quarter_chords.extend(three_quarter_chords_no_root)
+
+                self.chords = np.array(chords)
+                self.three_quarter_chords = np.array(three_quarter_chords)
+
+                self.V_three_quarter_induced = self.get_induced_velocity_at_points(
+                                    points=self.three_quarter_chords)              # induced velocity at three-quarter chord
+
+                self.V_three_quarter = self.get_velocity_at_points(points=self.three_quarter_chords)  # total v used for Re
+                V_three_quarter_magnitudes = np.linalg.norm(self.V_three_quarter, axis=1)
+
+                rot_freestream_velocities = self.op_point.compute_rotation_velocity_geometry_axes(
+                    self.three_quarter_chords)
+                self.inf_velocities = np.add(wide(steady_freestream_velocity), rot_freestream_velocities)
+                freestream_velocities_magnitudes = np.linalg.norm(self.inf_velocities, axis=1) # 1 x 3 v mag
+                self.freestream_velocities_magnitude = np.linalg.norm(freestream_velocities_magnitudes)
+                self.alpha_induced = np.arctan2d(-self.V_three_quarter_induced[:, 2], self.freestream_velocities_magnitude)     # minus to be positive alpha
+                self.alpha_eff = self.op_point.alpha - self.alpha_induced
+                Re = (
+                    V_three_quarter_magnitudes *
+                    chords /
+                    self.op_point.atmosphere.kinematic_viscosity()
+                )
+                machs = V_three_quarter_magnitudes / self.op_point.atmosphere.speed_of_sound()
+
+                self.CDs = np.array([
+                    polar_function(
+                        alpha=self.alpha_eff[i],
+                        Re=Re[i],
+                        mach=machs[i],
+                    )
+                    for i, polar_function in enumerate(CD_functions)
+                ])
+
+                wingIDspan = wingID.span("yz", include_centerline_distance=False, _sectional=True)
+                if wingID.symmetric:
+                    wingIDspan_flipped = wingIDspan[::-1]
+                    wingIDspan_flipped.extend(wingIDspan)
+                else:
+                    wingIDspan_flipped = wingIDspan
+                self.wingIDspan = np.array(wingIDspan_flipped)
+                self.wingIDarea = wingID.area()
+                self.visc_drag_dist = np.sum(np.trapz(self.CDs) * np.trapz(self.chords) * self.wingIDspan)
+                self.Cd_wing = self.visc_drag_dist / self.wingIDarea
+
+                Cd_wings.append(self.Cd_wing)
+                wings_area.append(self.wingIDarea)
+
+            Cd_profile = np.array(Cd_wings)
+            wings_area = np.array(wings_area)
+
+            self.Cd_profile = Cd_profile
+            self.wings_area = wings_area
+
+            CD_viscous = np.sum(self.Cd_profile * self.wings_area) / np.sum(self.wings_area)
+            self.CD_viscous = CD_viscous
+
         # Calculate nondimensional forces
         q = self.op_point.dynamic_pressure()
         s_ref = self.airplane.s_ref
@@ -311,6 +401,8 @@ class VortexLatticeMethod(ExplicitAnalysis):
         c_ref = self.airplane.c_ref
         self.CL = L / q / s_ref
         self.CD = D / q / s_ref
+        if self.viscous:
+            self.CD = self.CD + self.CD_viscous
         self.CY = Y / q / s_ref
         self.Cl = l_b / q / s_ref / b_ref
         self.Cm = m_b / q / s_ref / c_ref
@@ -329,12 +421,12 @@ class VortexLatticeMethod(ExplicitAnalysis):
             "l_b": l_b,
             "m_b": m_b,
             "n_b": n_b,
-            "CL" : self.CL,
-            "CD" : self.CD,
-            "CY" : self.CY,
-            "Cl" : self.Cl,
-            "Cm" : self.Cm,
-            "Cn" : self.Cn,
+            "CL": self.CL,
+            "CD": self.CD,
+            "CY": self.CY,
+            "Cl": self.Cl,
+            "Cm": self.Cm,
+            "Cn": self.Cn,
         }
 
     def run_with_stability_derivatives(self,
@@ -729,7 +821,7 @@ if __name__ == '__main__':
 
     sys.path.insert(0, str(geometry_folder))
 
-    from vanilla import airplane as vanilla
+    from UniqueWing import airplane as vanilla
 
     ### Do the AVL run
     vlm = VortexLatticeMethod(
@@ -743,7 +835,7 @@ if __name__ == '__main__':
             q=0,
             r=0,
         ),
-        spanwise_resolution=10,
+        spanwise_resolution=5,
         chordwise_resolution=10,
     )
 
