@@ -189,25 +189,21 @@ class NlLiftingLine(ImplicitAnalysis):
                     (np.arange(len(faces)) + 1) % chordwise_resolution == 0
                 )
 
-            CL_func = []
-            CD_func = []
-            CM_func = []
             for xsec_a, xsec_b in zip(         # iterating through the cross-sections in the wing geometry
                     wing.xsecs[:-1],
                     wing.xsecs[1:]
             ):
-                CL_func.append(xsec_a.airfoil.blend_with_another_airfoil(xsec_b.airfoil).CL_function)
-                CD_func.append(xsec_a.airfoil.blend_with_another_airfoil(xsec_b.airfoil).CD_function)
-                CM_func.append(xsec_a.airfoil.blend_with_another_airfoil(xsec_b.airfoil).CM_function)
-            CL_functions.extend(CL_func)
-            CD_functions.extend(CD_func)
-            CM_functions.extend(CM_func)
+
+
+                CL_functions.append(xsec_a.airfoil.blend_with_another_airfoil(xsec_b.airfoil).CL_function)
+                CD_functions.append(xsec_a.airfoil.blend_with_another_airfoil(xsec_b.airfoil).CD_function)
+                CM_functions.append(xsec_a.airfoil.blend_with_another_airfoil(xsec_b.airfoil).CM_function)
 
             if wing.symmetric:
 
-                CL_functions.extend(CL_func)
-                CD_functions.extend(CD_func)
-                CM_functions.extend(CM_func)
+                CL_functions.extend(CL_functions)
+                CD_functions.extend(CD_functions)
+                CM_functions.extend(CM_functions)
 
         front_left_vertices = np.concatenate(front_left_vertices)
         back_left_vertices = np.concatenate(back_left_vertices)
@@ -297,7 +293,7 @@ class NlLiftingLine(ImplicitAnalysis):
         alphas = 90 - np.arccosd(
             np.sum(velocity_directions * self.normal_directions, axis=1)
         )
-        self.alphas = alphas
+
         # Get perpendicular parameters
         cos_sweeps = np.sum(velocity_directions * -local_forward_direction, axis=1)
 
@@ -305,7 +301,7 @@ class NlLiftingLine(ImplicitAnalysis):
                 velocity_magnitudes *
                 self.chords /
                 self.op_point.atmosphere.kinematic_viscosity()
-        ) * cos_sweeps
+        )  * cos_sweeps
 
         machs = velocity_magnitudes / self.op_point.atmosphere.speed_of_sound() * cos_sweeps
 
@@ -381,7 +377,6 @@ class NlLiftingLine(ImplicitAnalysis):
             get = lambda x: self.sol(x)
             CDs = get(CDs)
             CMs = get(CMs)
-            self.alpha = get(alphas)
             residuals = get(residuals)
 
         if self.verbose:
