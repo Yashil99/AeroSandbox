@@ -1,127 +1,129 @@
-from aerosandbox.tools.pretty_plots.utilities.natural_univariate_spline import NaturalUnivariateSpline as Spline
-import numpy as np
+from typing import Union, Iterable, Tuple, Optional, Callable
 import matplotlib.pyplot as plt
-from tqdm import tqdm
+
+import numpy as np
+
+from aerosandbox.tools.statistics import time_series_uncertainty_quantification as tsuq
 
 
 def plot_with_bootstrapped_uncertainty(
         x: np.ndarray,
         y: np.ndarray,
-        y_stdev: float,
-        ci: float = 0.95,
-        color=None,
-        draw_line=True,
-        draw_ci=True,
-        draw_data=True,
-        label_line=None,
-        label_ci=None,
-        label_data=None,
+        ci: Optional[Union[float, Iterable[float], np.ndarray]] = 0.95,
+        color: Optional[Union[str, Tuple[float]]] = None,
+        draw_data: bool = True,
+        label_line: Union[bool, str] = "Best Estimate",
+        label_ci: bool = True,
+        label_data: Union[bool, str] = "Raw Data",
+        ci_to_alpha_mapping: Callable[[float], float] = lambda ci: 0.8 * (1 - ci) ** 0.4,
         n_bootstraps=2000,
-        n_fit_points=300,
+        n_fit_points=500,
         spline_degree=3,
-        normalize=True,
+        x_log_scale: bool = False,
+        y_log_scale: bool = False,
 ):
+    x = np.array(x)
+    y = np.array(y)
 
-    if not (ci > 0 and ci < 1):
-        raise ValueError("Confidence interval `ci` should be in the range of (0, 1).")
+    ### Log-transform the data if desired
+    if x_log_scale:
+        x = np.log(x)
+    if y_log_scale:
+        y = np.log(y)
 
-    ### Discard any NaN points
-    isnan = np.logical_or(
-        np.isnan(x),
-        np.isnan(y),
-    )
-    x = x[~isnan]
-    y = y[~isnan]
-
-    ### Prepare for normalization
-    if normalize:
-        x_min = np.min(x)
-        x_rng = np.max(x) - x_min
-        y_min = np.min(y)
-        y_rng = np.max(y) - y_min
-
-        x_normalize = lambda xi: (xi - x_min) / x_rng
-        y_normalize = lambda yi: (yi - y_min) / y_rng
-        x_unnormalize = lambda xi: xi * x_rng + x_min
-        y_unnormalize = lambda yi: yi * y_rng + y_min
-
+    ### Make sure `ci` is a NumPy array
+    if ci is None:
+        ci = []
     else:
-        x_normalize = lambda xi: xi
-        y_normalize = lambda yi: yi
-        x_unnormalize = lambda xi: xi
-        y_unnormalize = lambda yi: yi
+        try:
+            iter(ci)
+        except TypeError:
+            ci = [ci]
+    ci = np.array(ci)
 
-    ### Prepare for the bootstrap
-    x_fit = np.linspace(
-        np.min(x),
-        np.max(x),
-        n_fit_points
+    ### Make sure `ci` is sorted'
+    ci = np.sort(ci)
+
+    ### Make sure `ci` is in bounds
+    if not (np.all(ci > 0) and np.all(ci < 1)):
+        raise ValueError("Confidence interval values in `ci` should all be in the range of (0, 1).")
+
+    ### Do the bootstrap fits
+    x_fit, y_bootstrap_fits = tsuq.bootstrap_fits(
+        x=x,
+        y=y,
+        n_bootstraps=n_bootstraps,
+        fit_points=n_fit_points,
+        spline_degree=spline_degree,
+        normalize=True,
     )
 
-    y_bootstrap_fits = np.empty((n_bootstraps, len(x_fit)))
+    ### Undo the log-transform if desired
+    if x_log_scale:
+        x = np.exp(x)
+        x_fit = np.exp(x_fit)
+    if y_log_scale:
+        y = np.exp(y)
+        y_bootstrap_fits = np.exp(y_bootstrap_fits)
 
-    for i in tqdm(range(n_bootstraps), desc="Bootstrapping", unit=" samples"):
-
-        ### Obtain a bootstrap resample
-        ### Here, instead of truly resampling, we just pick weights that effectively mimic a resample.
-        ### A computationally-efficient way to pick weights is the following clever trick with uniform sampling:
-        splits = np.random.rand(len(x) + 1) * len(x)  # "limit" bootstrapping
-        splits[0] = 0
-        splits[-1] = len(x)
-
-        weights = np.diff(np.sort(splits))
-
-        y_bootstrap_fits[i, :] = y_unnormalize(Spline(
-            x=x_normalize(x),
-            y=y_normalize(y),
-            w=weights / y_normalize(y_stdev),
-            s=len(x) * (y_normalize(y).max() - y_normalize(y).min()) ** 0.5,
-            k=spline_degree,
-            ext='extrapolate'
-        )(x_normalize(x_fit)))
-
-    ### Compute a confidence interval using equal-tails method
-    y_median_and_ci = np.nanquantile(
-        y_bootstrap_fits,
-        q=[
-            (1 - ci) / 2,
-            0.5,
-            1 - (1 - ci) / 2
-        ],
-        axis=0
+    ### Plot the best-estimator line
+    line, = plt.plot(
+        x_fit,
+        np.nanquantile(y_bootstrap_fits, q=0.5, axis=0),
+        color=color,
+        label=label_line,
+        zorder=2,
     )
+    if color is None:
+        color = line.get_color()
 
-    if draw_line:
-        line, = plt.plot(
-            x_fit,
-            y_median_and_ci[1, :],
-            color=color,
-            label=label_line
-        )
-        if color is None:
-            color = line.get_color()
+    if x_log_scale:
+        plt.xscale('log')
+    if y_log_scale:
+        plt.yscale('log')
 
-    if draw_ci:
-        plt.fill_between(
-            x_fit,
-            y_median_and_ci[0, :],
-            y_median_and_ci[2, :],
-            color=color,
-            label=label_ci,
-            alpha=0.25,
-            linewidth=0
-        )
+    ### Plot the confidence intervals
+    if len(ci) != 0:
+
+        ### Using the method of equal-tails confidence intervals
+        lower_quantiles = np.concatenate([[0.5], (1 - ci) / 2])
+        upper_quantiles = np.concatenate([[0.5], 1 - (1 - ci) / 2])
+
+        lower_ci = np.nanquantile(y_bootstrap_fits, q=lower_quantiles, axis=0)
+        upper_ci = np.nanquantile(y_bootstrap_fits, q=upper_quantiles, axis=0)
+
+        for i, ci_val in enumerate(ci):
+            settings = dict(
+                color=color,
+                alpha=ci_to_alpha_mapping(ci_val),
+                linewidth=0,
+                zorder=1.5
+            )
+            plt.fill_between(
+                x_fit,
+                lower_ci[i],
+                lower_ci[i + 1],
+                label=f"{ci_val:.0%} CI" if label_ci else None,
+                **settings
+            )
+            plt.fill_between(
+                x_fit,
+                upper_ci[i],
+                upper_ci[i + 1],
+                **settings
+            )
+
+    ### Plot the data
     if draw_data:
-        line, = plt.plot(
+        plt.plot(
             x,
             y,
-            ".",
-            color=color,
+            ".k",
             label=label_data,
-            alpha=0.5
+            alpha=0.5,
+            markeredgewidth=0,
+            zorder=1,
         )
-        if color is None:
-            color = line.get_color()
     return x_fit, y_bootstrap_fits
 
 
@@ -133,24 +135,50 @@ if __name__ == '__main__':
     np.random.seed(0)
 
     ### Generate data
-    x = np.linspace(0, 10, 101)
-    y_true = np.abs(x - 5)  # np.sin(x)
-    y_noisy = y_true + 0.1 * np.random.randn(len(x))
+    x = np.linspace(0, 20, 101)
+    y_true = np.sin(x - 5)  # np.sin(x)
+
+    y_stdev = 0.5
+
+    y_noisy = y_true + y_stdev * np.random.randn(len(x))
 
     ### Plot spline regression
-    fig, ax = plt.subplots(dpi=300)
+    fig, ax = plt.subplots()
     x_fit, y_bootstrap_fits = plot_with_bootstrapped_uncertainty(
         x,
         y_noisy,
-        y_stdev=0.1 * np.std(y_noisy),
+        ci=[0.75, 0.95],
         label_line="Best Estimate",
-        label_data="Data",
-        label_ci="95% CI",
+        label_data="Data (True Function + Noise)",
+        # normalize=False,
     )
-    ax.plot(x, y_true, "k", label="True Function", alpha=0.2)
+    ax.plot(x, y_true, "k", label="True Function", alpha=0.8, zorder=1)
+    plt.legend(ncols=2)
 
     p.show_plot(
         "Spline Bootstrapping Test",
         r"$x$",
         r"$y$",
+        legend=False
     )
+
+    ### Generate data
+    x = np.geomspace(10, 1000, 1000)
+    y_true = 3 * x ** 0.5
+
+    y_stdev = 0.1
+
+    y_noisy = y_true * y_stdev * np.random.lognormal(size=len(x))
+
+    fig, ax = plt.subplots()
+    x_fit, y_bootstrap_fits = plot_with_bootstrapped_uncertainty(
+        x,
+        y_noisy,
+        ci=[0.75, 0.95],
+        label_line="Best Estimate",
+        label_data="Data (True Function + Noise)",
+        # normalize=False,
+        x_log_scale=True,
+        y_log_scale=True,
+    )
+    p.show_plot()

@@ -383,11 +383,11 @@ class Airplane(AeroSandboxObject):
                 **kwargs
         ):
             if symmetric:
-                xyz = np.vstack([
+                xyz = np.concatenate([
                     xyz,
-                    [np.nan] * 3,
+                    np.array([np.nan] * 3).reshape((1, -1)),
                     xyz * np.array([1, -1, 1])
-                ])
+                ], axis=0)
 
             ax.plot(
                 xyz[:, 0],
@@ -840,6 +840,9 @@ class Airplane(AeroSandboxObject):
                    filename,
                    include_fuselages: bool = True
                    ):
+        # TODO include option for mass file export as well
+        # Use MassProperties.export_AVL_mass...
+
         from aerosandbox.aerodynamics.aero_3D.avl import AVL
         avl = AVL(
             airplane=self,
@@ -987,7 +990,7 @@ class Airplane(AeroSandboxObject):
                 "Type"      : "MAINWING",
                 "Position"  : ",".join([str(x) for x in xyz_le_root]),
                 "Tilt_angle": 0.,
-                "Symetric"  : wing.symmetric,
+                "Symetric"  : wing.symmetric,  # This tag is a typo in XFLR...
                 "isFin"     : "false",
                 "isSymFin"  : "false",
             }.items():
@@ -1038,7 +1041,7 @@ class Airplane(AeroSandboxObject):
                 "Type"      : "ELEVATOR",
                 "Position"  : ",".join([str(x) for x in xyz_le_root]),
                 "Tilt_angle": 0.,
-                "Symetric"  : wing.symmetric,
+                "Symetric"  : wing.symmetric,  # This tag is a typo in XFLR...
                 "isFin"     : "false",
                 "isSymFin"  : "false",
             }.items():
@@ -1089,7 +1092,7 @@ class Airplane(AeroSandboxObject):
                 "Type"      : "FIN",
                 "Position"  : ",".join([str(x) for x in xyz_le_root]),
                 "Tilt_angle": 0.,
-                "Symetric"  : "true",
+                "Symetric"  : "true",  # This tag is a typo in XFLR...
                 "isFin"     : "true",
                 "isSymFin"  : wing.symmetric,
             }.items():
@@ -1300,4 +1303,4 @@ if __name__ == '__main__':
     )
 
     # airplane.draw_three_view()
-    airplane.export_XFLR("test.xml", mass_props=asb.MassProperties(mass=1, Ixx=1, Iyy=1, Izz=1))
+    # airplane.export_XFLR("test.xml", mass_props=asb.MassProperties(mass=1, Ixx=1, Iyy=1, Izz=1))

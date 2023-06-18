@@ -55,26 +55,34 @@ class XFoil(ExplicitAnalysis):
 
         Args:
 
-            airfoil: The angle of attack [degrees]
+            airfoil: The airfoil to analyze. Should be an AeroSandbox Airfoil object.
 
             Re: The chord-referenced Reynolds number
 
             mach: The freestream Mach number
 
-            n_crit: The critical Tollmein-Schlichting wave amplification factor
+            n_crit: The critical Tollmein-Schlichting wave amplification factor, as part of the "e^n" transition
+                criterion. This is a measure of freestream turbulence and surface roughness. The following reference conditions
+                are given in the XFoil documentation:
+
+                - sailplane:                12-14
+                - motorglider:              11-13
+                - clean wind tunnel:        10-12
+                - average wind tunnel:      9 (default)
+                - dirty wind tunnel:        4-8
 
             xtr_upper: The upper-surface trip location [x/c]
 
             xtr_lower: The lower-surface trip location [x/c]
 
-            hinge_point_x: The x/c location of the hinge point. This is used to calculate hinge moment. If this is
-            None, hinge moment is not calculated.
+            hinge_point_x: The x/c location of the hinge point. This is used to calculate the hinge moment. If this is
+                None, the hinge moment is not calculated.
 
             full_potential: If this is set True, it will turn full-potential mode on. Note that full-potential mode
-            is only available in XFoil v7.xx or higher. (Unless you have specifically gone through the trouble of
-            acquiring a copy of XFoil v7.xx you likely have v6.xx. Version 7.xx is not publicly distributed as of
-            2022; contact Mark Drela at MIT for a copy.) Note that if you enable this flag with XFoil v6.xx,
-            you'll likely get an error (no output file generated).
+                is only available in XFoil v7.xx or higher. (Unless you have specifically gone through the trouble of
+                acquiring a copy of XFoil v7.xx you likely have v6.xx. Version 7.xx is not publicly distributed as of
+                2023; contact Mark Drela at MIT for a copy.) Note that if you enable this flag with XFoil v6.xx,
+                you'll likely get an error (no output file generated).
 
             max_iter: How many iterations should we let XFoil do?
 
@@ -97,16 +105,16 @@ class XFoil(ExplicitAnalysis):
                 your OS.)
 
             xfoil_repanel: Controls whether to allow XFoil to repanel your airfoil using its internal methods (PANE
-            -> PPAR, both with default settings, 160 nodes)
+                -> PPAR, both with default settings, 160 nodes)
 
             verbose: Controls whether or not XFoil output is printed to command line.
 
             timeout: Controls how long any individual XFoil run (i.e. alpha sweep) is allowed to run before the
-            process is killed. Given in units of seconds. To disable timeout, set this to None.
+                process is killed. Given in units of seconds. To disable timeout, set this to None.
 
             working_directory: Controls which working directory is used for the XFoil input and output files. By
-            default, this is set to a TemporaryDirectory that is deleted after the run. However, you can set it to
-            somewhere local for debugging purposes.
+                default, this is set to a TemporaryDirectory that is deleted after the run. However, you can set it to
+                somewhere local for debugging purposes.
 
         """
         if mach >= 1:
@@ -327,7 +335,13 @@ class XFoil(ExplicitAnalysis):
             except FileNotFoundError:
                 raise FileNotFoundError(
                     "It appears XFoil didn't produce an output file, probably because it crashed.\n"
-                    "Try running with `verbose=True` in the XFoil constructor to see what's going on."
+                    "To troubleshoot, try some combination of the following:\n"
+                    "\t - In the XFoil constructor, verify that either XFoil is on PATH or that the `xfoil_command` parameter is set.\n"
+                    "\t - In the XFoil constructor, run with `verbose=True`.\n"
+                    "\t - In the XFoil constructor, set the `working_directory` parameter to a known folder to see the XFoil input and output files.\n"
+                    "\t - In the XFoil constructor, set the `timeout` parameter to a large number to see if XFoil is just taking a long time to run.\n"
+                    "\t - On Windows, use `XFoil.open_interactive()` to run XFoil interactively in a new window.\n"
+                    "\t - Try allowing XFoil to repanel the airfoil by setting `repanel=True` in the XFoil constructor.\n"
                 )
 
             def str_to_float(s: str) -> float:
